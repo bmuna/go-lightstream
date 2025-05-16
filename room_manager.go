@@ -46,6 +46,20 @@ func (rm *RoomManager) LeaveAllRooms(conn *websocket.Conn) {
 	}
 }
 
+func (rm *RoomManager) LeaveRoom(roomId string, conn *websocket.Conn) {
+	rm.lock.Lock()
+	defer rm.lock.Unlock()
+
+	if clients, ok := rm.rooms[roomId]; ok {
+		delete(clients, conn)
+
+		if len(rm.rooms) == 0 {
+			delete(rm.rooms, roomId)
+		}
+	}
+
+}
+
 // BroadcastToRoom messenger except the sender
 func (rm *RoomManager) BroadcastToRoom(roomID string, sender *websocket.Conn, message []byte) {
 	rm.lock.RLock()

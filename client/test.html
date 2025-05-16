@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Go Lightstream Chat</title>
+  <style>
+    body { font-family: Arial; margin: 20px; }
+    #messages { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
+    #inputArea { margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Join a Chat Room</h2>
+
+  <label>Room ID: <input id="roomID" /></label>
+  <button onclick="connect()">Join</button>
+
+  <div id="chat" style="display:none;">
+    <div id="messages"></div>
+
+    <div id="inputArea">
+      <input id="messageInput" placeholder="Type a message..." />
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <script>
+    let socket;
+    let currentRoom = '';
+
+    function connect() {
+      const roomID = document.getElementById('roomID').value;
+      if (!roomID) return alert("Enter room ID");
+
+      socket = new WebSocket("ws://localhost:8080/ws");
+
+      socket.onopen = function () {
+        currentRoom = roomID;
+
+        // Join the room
+        socket.send(JSON.stringify({ type: "join", roomID }));
+
+        document.getElementById("chat").style.display = "block";
+      };
+
+      socket.onmessage = function (event) {
+        const message = JSON.parse(event.data);
+        const el = document.createElement("div");
+        el.textContent = `[Room ${message.roomID}] ${message.message}`;
+        document.getElementById("messages").appendChild(el);
+      };
+
+      socket.onclose = function () {
+        alert("Connection closed.");
+      };
+
+      socket.onerror = function (err) {
+        console.error("WebSocket error:", err);
+      };
+    }
+
+    function sendMessage() {
+      const msgInput = document.getElementById("messageInput");
+      const message = msgInput.value;
+      if (!message) return;
+
+      const msgObj = {
+        type: "message",
+        roomID: currentRoom,
+        message: message
+      };
+
+      socket.send(JSON.stringify(msgObj));
+      msgInput.value = '';
+    }
+  </script>
+</body>
+</html>

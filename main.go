@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 
@@ -29,41 +30,44 @@ func main() {
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("Upgrade error:", err)
+		log.Print("Upgrade error:", err)
 		return
 	}
-	defer func() {
-		roomManager.LeaveAllRooms(conn)
-		conn.Close()
-		log.Println("Client disconnected")
-	}()
+	defer conn.Close()
 
-	// Extract roomID from query (e.g., ws://localhost:8080/ws?room=room1)
-	roomID := r.URL.Query().Get("room")
-	if roomID == "" {
-		log.Println("Missing room ID")
-		return
-	}
-
-	roomManager.JoinRoom(roomID, conn)
+	var currentRoom string
 
 	for {
-		messageType, message, err := conn.ReadMessage()
+		_, messageBytes, err := conn.ReadMessage()
 		if err != nil {
 			log.Println("Read error:", err)
 			break
 		}
 
-		log.Printf("Received from room %s: %s", roomID, message)
-
-		// Broadcast to others in the room
-		roomManager.BroadcastToRoom(roomID, conn, message)
-
-		// Optional: echo back to sender
-		err = conn.WriteMessage(messageType, message)
-		if err != nil {
-			log.Println("Write error:", err)
-			break
+		var msg Message
+		if err := json.Unmarshal(messageBytes, &msg); err != nil {
+			log.Println("Unmarshal error:", err)
+			continue
 		}
+
+		switch msg.Type {
+		case "join":
+			currentRoom = msg.RoomID
+			roomManager.JoinRoom(msg.RoomID, conn)
+			log.Println("User joined room:", msg.RoomID)
+
+		case "message":
+			// Broadcast message to everyone else in the same room
+			roomManager.BroadcastToRoom(msg.RoomID, conn, messageBytes)
+
+		default:
+			log.Println("Unknown message type:", msg.Type)
+		}
+	}
+
+	// Cleanup on disconnect
+	if currentRoom != "" {
+		roomManager.LeaveRoom(currentRoom, conn)
+		log.Println("User left room:", currentRoom)
 	}
 }
