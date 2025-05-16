@@ -13,6 +13,8 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+var roomManager = NewRoomManager()
+
 func main() {
 
 	http.HandleFunc("/ws", wsHandler)
@@ -26,32 +28,42 @@ func main() {
 
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
-
 	if err != nil {
-		log.Print("Upgrade error", err)
+		log.Println("Upgrade error:", err)
+		return
+	}
+	defer func() {
+		roomManager.LeaveAllRooms(conn)
+		conn.Close()
+		log.Println("Client disconnected")
+	}()
+
+	// Extract roomID from query (e.g., ws://localhost:8080/ws?room=room1)
+	roomID := r.URL.Query().Get("room")
+	if roomID == "" {
+		log.Println("Missing room ID")
+		return
 	}
 
-	defer conn.Close()
+	roomManager.JoinRoom(roomID, conn)
 
 	for {
-
 		messageType, message, err := conn.ReadMessage()
-
 		if err != nil {
-			log.Println("error when reading", err)
+			log.Println("Read error:", err)
 			break
 		}
 
-		log.Printf("Received: %s", message)
+		log.Printf("Received from room %s: %s", roomID, message)
 
+		// Broadcast to others in the room
+		roomManager.BroadcastToRoom(roomID, conn, message)
+
+		// Optional: echo back to sender
 		err = conn.WriteMessage(messageType, message)
-
 		if err != nil {
-			log.Println("error when writing", err)
+			log.Println("Write error:", err)
 			break
 		}
-
 	}
-	log.Println("Client disconnected")
-
 }
