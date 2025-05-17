@@ -15,6 +15,7 @@ import (
 
 type RoomManager struct {
 	rooms map[string]map[*websocket.Conn]bool
+	users map[string]*websocket.Conn
 	lock  sync.RWMutex
 }
 
@@ -22,11 +23,12 @@ type RoomManager struct {
 func NewRoomManager() *RoomManager {
 	return &RoomManager{
 		rooms: make(map[string]map[*websocket.Conn]bool),
+		users: make(map[string]*websocket.Conn),
 	}
 }
 
 // JoinRoom adds a WebSocket connection to the specified room
-func (rm *RoomManager) JoinRoom(roomID string, conn *websocket.Conn) {
+func (rm *RoomManager) JoinRoom(roomID string, userID string, conn *websocket.Conn) {
 	rm.lock.Lock()
 	defer rm.lock.Unlock()
 
@@ -34,6 +36,7 @@ func (rm *RoomManager) JoinRoom(roomID string, conn *websocket.Conn) {
 		rm.rooms[roomID] = make(map[*websocket.Conn]bool)
 	}
 	rm.rooms[roomID][conn] = true
+	rm.users[userID] = conn
 }
 
 // LeaveAllRooms removes a WebSocket connection from all rooms
@@ -46,18 +49,25 @@ func (rm *RoomManager) LeaveAllRooms(conn *websocket.Conn) {
 	}
 }
 
-func (rm *RoomManager) LeaveRoom(roomId string, conn *websocket.Conn) {
+func (rm *RoomManager) LeaveRoom(roomID string, conn *websocket.Conn) {
 	rm.lock.Lock()
 	defer rm.lock.Unlock()
 
-	if clients, ok := rm.rooms[roomId]; ok {
+	// Remove from room
+	if clients, ok := rm.rooms[roomID]; ok {
 		delete(clients, conn)
-
-		if len(rm.rooms) == 0 {
-			delete(rm.rooms, roomId)
+		if len(clients) == 0 {
+			delete(rm.rooms, roomID)
 		}
 	}
 
+	// Remove from users
+	for userID, userConn := range rm.users {
+		if userConn == conn {
+			delete(rm.users, userID)
+			break
+		}
+	}
 }
 
 // BroadcastToRoom messenger except the sender
@@ -70,5 +80,14 @@ func (rm *RoomManager) BroadcastToRoom(roomID string, sender *websocket.Conn, me
 		if conn != sender {
 			_ = conn.WriteMessage(websocket.TextMessage, message)
 		}
+	}
+}
+
+func (rm *RoomManager) SendToUser(targetID string, message []byte) {
+	rm.lock.RLock()
+	defer rm.lock.RUnlock()
+
+	if conn, found := rm.users[targetID]; found {
+		conn.WriteMessage(websocket.TextMessage, message)
 	}
 }

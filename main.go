@@ -36,6 +36,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	defer conn.Close()
 
 	var currentRoom string
+	var currentUser string
 
 	for {
 		_, messageBytes, err := conn.ReadMessage()
@@ -53,12 +54,25 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "join":
 			currentRoom = msg.RoomID
-			roomManager.JoinRoom(msg.RoomID, conn)
+			currentUser = msg.SenderID
+			roomManager.JoinRoom(msg.RoomID, currentUser, conn)
 			log.Println("User joined room:", msg.RoomID)
+
+			notification := Message{
+				Type:     "user-joined",
+				SenderID: currentUser,
+				RoomID:   currentRoom,
+			}
+
+			notifyBytes, _ := json.Marshal(notification)
+			roomManager.BroadcastToRoom(currentRoom, conn, notifyBytes)
 
 		case "message":
 			// Broadcast message to everyone else in the same room
 			roomManager.BroadcastToRoom(msg.RoomID, conn, messageBytes)
+
+		case "offer", "answer", "ice-candidate":
+			roomManager.SendToUser(msg.TargetID, messageBytes)
 
 		default:
 			log.Println("Unknown message type:", msg.Type)
@@ -66,7 +80,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cleanup on disconnect
-	if currentRoom != "" {
+	if currentRoom != "" && currentUser != "" {
 		roomManager.LeaveRoom(currentRoom, conn)
 		log.Println("User left room:", currentRoom)
 	}
