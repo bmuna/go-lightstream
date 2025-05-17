@@ -39,6 +39,7 @@ func (rm *RoomManager) JoinRoom(roomID string, userID string, conn *websocket.Co
 	rm.users[userID] = conn
 }
 
+
 // LeaveAllRooms removes a WebSocket connection from all rooms
 func (rm *RoomManager) LeaveAllRooms(conn *websocket.Conn) {
 	rm.lock.Lock()

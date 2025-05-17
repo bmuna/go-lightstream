@@ -67,6 +67,8 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 			notifyBytes, _ := json.Marshal(notification)
 			roomManager.BroadcastToRoom(currentRoom, conn, notifyBytes)
 
+		case "remove":
+
 		case "message":
 			// Broadcast message to everyone else in the same room
 			roomManager.BroadcastToRoom(msg.RoomID, conn, messageBytes)
@@ -83,5 +85,13 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	if currentRoom != "" && currentUser != "" {
 		roomManager.LeaveRoom(currentRoom, conn)
 		log.Println("User left room:", currentRoom)
+
+		notification := Message{
+			Type:     "user-left",
+			SenderID: currentUser,
+			RoomID:   currentRoom,
+		}
+		notifyBytes, _ := json.Marshal(notification)
+		roomManager.BroadcastToRoom(currentRoom, conn, notifyBytes)
 	}
 }
