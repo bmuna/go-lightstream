@@ -1,78 +1,143 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Go Lightstream Chat</title>
-  <style>
-    body { font-family: Arial; margin: 20px; }
-    #messages { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
-    #inputArea { margin-top: 10px; }
-  </style>
+  <title>Go WebRTC P2P Chat</title>
 </head>
 <body>
-  <h2>Join a Chat Room</h2>
+  <h1>Video Chat</h1>
 
-  <label>Room ID: <input id="roomID" /></label>
-  <button onclick="connect()">Join</button>
-
-  <div id="chat" style="display:none;">
-    <div id="messages"></div>
-
-    <div id="inputArea">
-      <input id="messageInput" placeholder="Type a message..." />
-      <button onclick="sendMessage()">Send</button>
-    </div>
+  <div>
+    <video id="localVideo" autoplay playsinline muted style="width: 300px; border: 1px solid black;"></video>
+    <video id="remoteVideo" autoplay playsinline style="width: 300px; border: 1px solid black;"></video>
   </div>
 
   <script>
-    let socket;
-    let currentRoom = '';
+    const localVideo = document.getElementById('localVideo');
+    const remoteVideo = document.getElementById('remoteVideo');
+  
+    const roomID = "room1";
+    const userID = crypto.randomUUID();
 
-    function connect() {
-      const roomID = document.getElementById('roomID').value;
-      if (!roomID) return alert("Enter room ID");
+    console.log("My User ID is:", userID);
 
-      socket = new WebSocket("ws://localhost:8080/ws");
-
-      socket.onopen = function () {
-        currentRoom = roomID;
-
-        // Join the room
-        socket.send(JSON.stringify({ type: "join", roomID }));
-
-        document.getElementById("chat").style.display = "block";
-      };
-
-      socket.onmessage = function (event) {
-        const message = JSON.parse(event.data);
-        const el = document.createElement("div");
-        el.textContent = `[Room ${message.roomID}] ${message.message}`;
-        document.getElementById("messages").appendChild(el);
-      };
-
-      socket.onclose = function () {
-        alert("Connection closed.");
-      };
-
-      socket.onerror = function (err) {
-        console.error("WebSocket error:", err);
-      };
+    const ws = new WebSocket("ws://localhost:8080/ws");
+  
+    let localStream;
+    let remoteStream = new MediaStream();
+    let peerConnection;
+  
+    const config = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" }
+      ]
+    };
+  
+    ws.onopen = () => {
+      console.log("WebSocket connected");
+      ws.send(JSON.stringify({ type: "join", roomID, senderID: userID }));
+    };
+  
+    ws.onmessage = async (event) => {
+      const msg = JSON.parse(event.data);
+  
+      if (msg.senderID === userID) return; // Ignore our own messages
+  
+      switch (msg.type) {
+        case "offer":
+          await handleOffer(msg);
+          break;
+        case "answer":
+          await handleAnswer(msg);
+          break;
+        case "ice-candidate":
+          if (peerConnection) {
+            peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
+          }
+          break;
+      }
+    };
+  
+    async function startMedia() {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
+      } catch (err) {
+        console.error("Error accessing media devices.", err);
+      }
     }
-
-    function sendMessage() {
-      const msgInput = document.getElementById("messageInput");
-      const message = msgInput.value;
-      if (!message) return;
-
-      const msgObj = {
-        type: "message",
-        roomID: currentRoom,
-        message: message
+  
+    function createPeerConnection(targetID) {
+      peerConnection = new RTCPeerConnection(config);
+  
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          ws.send(JSON.stringify({
+            type: "ice-candidate",
+            targetID,
+            senderID: userID,
+            candidate: event.candidate
+          }));
+        }
       };
-
-      socket.send(JSON.stringify(msgObj));
-      msgInput.value = '';
+  
+      peerConnection.ontrack = (event) => {
+        event.streams[0].getTracks().forEach(track => {
+          remoteStream.addTrack(track);
+        });
+        remoteVideo.srcObject = remoteStream;
+      };
+  
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+      });
     }
+  
+    async function makeOffer(targetID) {
+      createPeerConnection(targetID);
+  
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+  
+      ws.send(JSON.stringify({
+        type: "offer",
+        offer,
+        senderID: userID,
+        targetID
+      }));
+    }
+  
+    async function handleOffer(msg) {
+      createPeerConnection(msg.senderID);
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.offer));
+  
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+  
+      ws.send(JSON.stringify({
+        type: "answer",
+        answer,
+        senderID: userID,
+        targetID: msg.senderID
+      }));
+    }
+  
+    async function handleAnswer(msg) {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.answer));
+    }
+  
+    startMedia().then(() => {
+      // 🟡 Automatically make offer if another user is already in the room
+      // For now, we’ll simulate a delay to give others time to join
+      setTimeout(() => {
+        // 👇 Trigger offer to the other peer (assuming there's only 1 peer for now)
+        const otherUserID = prompt("Enter target userID to connect to:");
+        if (otherUserID) {
+          makeOffer(otherUserID);
+        }
+      }, 2000);
+    });
   </script>
+  
 </body>
 </html>
