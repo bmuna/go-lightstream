@@ -9,96 +9,102 @@
 
   <div>
     <video id="localVideo" autoplay playsinline muted style="width: 300px; border: 1px solid black;"></video>
-    <video id="remoteVideo" autoplay playsinline style="width: 300px; border: 1px solid black;"></video>
   </div>
 
   <script>
     const localVideo = document.getElementById('localVideo');
-    const remoteVideo = document.getElementById('remoteVideo');
-  
     const roomID = "room1";
     const userID = crypto.randomUUID();
-
-    console.log("My User ID is:", userID);
-
-    const ws = new WebSocket("ws://localhost:8080/ws");
-  
     let localStream;
-    let remoteStream = new MediaStream();
-    let peerConnection;
-  
+    const peerConnections = {}; // key: peerID, value: RTCPeerConnection
+
     const config = {
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" }
       ]
     };
-  
-    ws.onopen = () => {
-      console.log("WebSocket connected");
-      ws.send(JSON.stringify({ type: "join", roomID, senderID: userID }));
-    };
-  
-    ws.onmessage = async (event) => {
-      const msg = JSON.parse(event.data);
-  
-      if (msg.senderID === userID) return; // Ignore our own messages
-  
-      switch (msg.type) {
-        case "offer":
-          await handleOffer(msg);
-          break;
-        case "answer":
-          await handleAnswer(msg);
-          break;
-        case "ice-candidate":
-          if (peerConnection) {
-            peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
-          }
-          break;
-      }
-    };
-  
+
     async function startMedia() {
       try {
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         localVideo.srcObject = localStream;
+
+        startWebSocket(); // Start signaling only after media is available
       } catch (err) {
         console.error("Error accessing media devices.", err);
       }
     }
-  
-    function createPeerConnection(targetID) {
-      peerConnection = new RTCPeerConnection(config);
-  
-      peerConnection.onicecandidate = (event) => {
+
+    function startWebSocket() {
+      const ws = new WebSocket("ws://localhost:8080/ws");
+
+      ws.onopen = () => {
+        console.log("WebSocket connected");
+        ws.send(JSON.stringify({ type: "join", roomID, senderID: userID }));
+      };
+
+      ws.onmessage = async (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.senderID === userID) return;
+
+        switch (msg.type) {
+          case "peers":
+            if (Array.isArray(msg.peers)) {
+              msg.peers.forEach(peerID => {
+                console.log("Connecting to existing peer:", peerID);
+                makeOffer(peerID, ws);
+              });
+            }
+            break;
+          case "offer":
+            await handleOffer(msg, ws);
+            break;
+          case "answer":
+            await handleAnswer(msg);
+            break;
+          case "ice-candidate":
+            const pc = peerConnections[msg.senderID];
+            if (pc) {
+              pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+            }
+            break;
+        }
+      };
+    }
+
+    function createPeerConnection(peerID, ws) {
+      const pc = new RTCPeerConnection(config);
+
+      pc.onicecandidate = (event) => {
         if (event.candidate) {
           ws.send(JSON.stringify({
             type: "ice-candidate",
-            targetID,
+            targetID: peerID,
             senderID: userID,
             candidate: event.candidate
           }));
         }
       };
-  
-      peerConnection.ontrack = (event) => {
-        event.streams[0].getTracks().forEach(track => {
-          remoteStream.addTrack(track);
-        });
-        remoteVideo.srcObject = remoteStream;
+
+      const remoteStream = new MediaStream();
+      pc.ontrack = (event) => {
+        remoteStream.addTrack(event.track);
+        addRemoteVideo(peerID, remoteStream);
       };
-  
+
       localStream.getTracks().forEach(track => {
-        peerConnection.addTrack(track, localStream);
+        pc.addTrack(track, localStream);
       });
+
+      peerConnections[peerID] = pc;
+      return pc;
     }
-  
-    async function makeOffer(targetID) {
-      createPeerConnection(targetID);
-  
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-  
+
+    async function makeOffer(targetID, ws) {
+      const pc = createPeerConnection(targetID, ws);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
       ws.send(JSON.stringify({
         type: "offer",
         offer,
@@ -106,14 +112,14 @@
         targetID
       }));
     }
-  
-    async function handleOffer(msg) {
-      createPeerConnection(msg.senderID);
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.offer));
-  
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-  
+
+    async function handleOffer(msg, ws) {
+      const pc = createPeerConnection(msg.senderID, ws);
+      await pc.setRemoteDescription(new RTCSessionDescription(msg.offer));
+
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
       ws.send(JSON.stringify({
         type: "answer",
         answer,
@@ -121,23 +127,29 @@
         targetID: msg.senderID
       }));
     }
-  
+
     async function handleAnswer(msg) {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(msg.answer));
+      const pc = peerConnections[msg.senderID];
+      if (pc) {
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+      }
     }
-  
-    startMedia().then(() => {
-      // 🟡 Automatically make offer if another user is already in the room
-      // For now, we’ll simulate a delay to give others time to join
-      setTimeout(() => {
-        // 👇 Trigger offer to the other peer (assuming there's only 1 peer for now)
-        const otherUserID = prompt("Enter target userID to connect to:");
-        if (otherUserID) {
-          makeOffer(otherUserID);
-        }
-      }, 2000);
-    });
+
+    function addRemoteVideo(peerID, stream) {
+      let video = document.getElementById(`remote-${peerID}`);
+      if (!video) {
+        video = document.createElement('video');
+        video.id = `remote-${peerID}`;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.style.width = "300px";
+        video.style.border = "1px solid black";
+        document.body.appendChild(video);
+      }
+      video.srcObject = stream;
+    }
+
+    startMedia(); // Entry point
   </script>
-  
 </body>
 </html>

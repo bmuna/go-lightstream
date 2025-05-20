@@ -1,4 +1,4 @@
-package main
+package lightstream
 
 import (
 	"sync"
@@ -38,7 +38,6 @@ func (rm *RoomManager) JoinRoom(roomID string, userID string, conn *websocket.Co
 	rm.rooms[roomID][conn] = true
 	rm.users[userID] = conn
 }
-
 
 // LeaveAllRooms removes a WebSocket connection from all rooms
 func (rm *RoomManager) LeaveAllRooms(conn *websocket.Conn) {
@@ -91,4 +90,22 @@ func (rm *RoomManager) SendToUser(targetID string, message []byte) {
 	if conn, found := rm.users[targetID]; found {
 		conn.WriteMessage(websocket.TextMessage, message)
 	}
+
+}
+
+func (rm *RoomManager) GetPeerIDsInRoomExcept(roomID string, excludeUserID string) []string {
+	rm.lock.RLock()
+	defer rm.lock.RUnlock()
+
+	var peers []string
+	if conns, ok := rm.rooms[roomID]; ok {
+		for conn := range conns {
+			for userID, userConn := range rm.users {
+				if userConn == conn && userID != excludeUserID {
+					peers = append(peers, userID)
+				}
+			}
+		}
+	}
+	return peers
 }
