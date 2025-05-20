@@ -125,4 +125,4 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Contact
 
-Created by [Your Name](https://github.com/bmuna) – feel free to reach out!
+Created by Biruk (https://github.com/bmuna) – feel free to reach out!
