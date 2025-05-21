@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -95,4 +96,9 @@ func (s *LightstreamServer) HandleWS(w http.ResponseWriter, r *http.Request) {
 		notifyBytes, _ := json.Marshal(notification)
 		s.roomManager.BroadcastToRoom(currentRoom, conn, notifyBytes)
 	}
+}
+
+func (s *LightstreamServer) HealthCheck(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
 }

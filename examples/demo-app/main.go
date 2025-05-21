@@ -8,8 +8,11 @@ import (
 
 func main() {
 	server := lightstream.NewServer()
-	http.HandleFunc("/ws", server.HandleWS)
+	http.HandleFunc("/ws", server.HandleWS)        // WebSocket endpoint
+	http.HandleFunc("/health", server.HealthCheck) // Health check
 
-	log.Println("Server running on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Println("Server started at :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatal("Server failed:", err)
+	}
 }
