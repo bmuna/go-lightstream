@@ -3,3 +3,4 @@ uvicorn
 torch
 numpy
 pydantic
+pandas
